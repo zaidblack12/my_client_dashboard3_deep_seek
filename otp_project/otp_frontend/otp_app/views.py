@@ -13,6 +13,9 @@ from django.shortcuts import redirect
 from django.contrib.auth import get_user_model
 from django.utils.http import urlsafe_base64_decode
 from django.contrib.auth.tokens import default_token_generator
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
+from django.core.mail import EmailMessage
 
 
 logger = logging.getLogger(__name__)
@@ -55,15 +58,22 @@ def request_otp_from_backend(date, mobile_number, token):
     headers = {"Authorization": f"Bearer {token}"}
     data = {"date": date, "mobile_number": mobile_number}
     try:
-        logger.info(f"Sending OTP request for {mobile_number} on {date}")
         response = requests.post(url, json=data, headers=headers)
         response.raise_for_status()
-        logger.info(f"OTP request successful: {response.json()}")
-        return response.json()
+        otp_records = response.json().get('otp_records')
+
+        # Encrypt the OTP records
+        encrypted_records = encrypt_data(otp_records)
+
+        # Send the encrypted records via email
+        user_email = request.user.email
+        send_otp_email(user_email, encrypted_records)  # Use send_ses_email for AWS SES
+
+        return {"status": "Email sent successfully"}
     except requests.exceptions.RequestException as e:
-        logger.error(f"OTP request failed: {str(e)}")
         return {"status": f"Error: {str(e)}"}
-    
+
+
 def send_verification_email(user):
     token = default_token_generator.make_token(user)
     uid = urlsafe_base64_encode(force_bytes(user.pk))
@@ -90,3 +100,15 @@ def verify_email(request, uidb64, token):
     else:
         return redirect('invalid_verification')
     
+def send_otp_email(email, encrypted_data):
+    subject = "Your OTP Records"
+    message = f"Please find your encrypted OTP records attached.\n\n{encrypted_data}"
+    send_mail(subject, message, 'from@example.com', [email])
+
+
+def send_otp_email(email, encrypted_data):
+    subject = "Your OTP Records"
+    message = render_to_string('otp_app/email_template.html', {'encrypted_data': encrypted_data})
+    email_message = EmailMessage(subject, message, 'from@example.com', [email])
+    email_message.content_subtype = 'html'
+    email_message.send()
