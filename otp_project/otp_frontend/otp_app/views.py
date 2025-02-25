@@ -3,6 +3,17 @@ from django.contrib.auth.decorators import login_required
 from .forms import OTPRequestForm
 import requests
 import logging
+from django_ratelimit.decorators import ratelimit
+from django.core.mail import send_mail
+from django.template.loader import render_to_string
+from django.utils.http import urlsafe_base64_encode
+from django.utils.encoding import force_bytes
+from django.contrib.auth.tokens import default_token_generator
+from django.shortcuts import redirect
+from django.contrib.auth import get_user_model
+from django.utils.http import urlsafe_base64_decode
+from django.contrib.auth.tokens import default_token_generator
+
 
 logger = logging.getLogger(__name__)
 
@@ -10,6 +21,7 @@ logger = logging.getLogger(__name__)
 def dashboard(request):
     return render(request, 'otp_app/dashboard.html')
 
+@ratelimit(key='user', rate='5/m')
 @login_required
 def request_otp(request):
     if request.method == 'POST':
@@ -51,3 +63,30 @@ def request_otp_from_backend(date, mobile_number, token):
     except requests.exceptions.RequestException as e:
         logger.error(f"OTP request failed: {str(e)}")
         return {"status": f"Error: {str(e)}"}
+    
+def send_verification_email(user):
+    token = default_token_generator.make_token(user)
+    uid = urlsafe_base64_encode(force_bytes(user.pk))
+    subject = "Verify Your Email"
+    message = render_to_string('otp_app/verification_email.html', {
+        'user': user,
+        'uid': uid,
+        'token': token,
+    })
+    send_mail(subject, message, 'from@example.com', [user.email])
+
+def verify_email(request, uidb64, token):
+    User = get_user_model()
+    try:
+        uid = urlsafe_base64_decode(uidb64).decode()
+        user = User.objects.get(pk=uid)
+    except (TypeError, ValueError, OverflowError, User.DoesNotExist):
+        user = None
+
+    if user and default_token_generator.check_token(user, token):
+        user.client.email_verified = True
+        user.client.save()
+        return redirect('dashboard')
+    else:
+        return redirect('invalid_verification')
+    

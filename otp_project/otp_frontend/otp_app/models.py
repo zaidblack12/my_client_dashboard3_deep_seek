@@ -5,10 +5,12 @@ class Client(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE)
     mobile_number = models.CharField(max_length=15)
     email_verified = models.BooleanField(default=False)
+    role = models.CharField(max_length=20, choices=[('user', 'User'), ('admin', 'Admin')], default='user')
 
     def __str__(self):
         return self.user.username
-
+    
+    
 class OTPRequestLog(models.Model):
     client = models.ForeignKey(Client, on_delete=models.CASCADE)
     date_requested = models.DateField()
