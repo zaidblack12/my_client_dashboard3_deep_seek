@@ -144,8 +144,9 @@ DATABASES = {
     }
 }
 
-LOGIN_URL = '/login/'
-LOGIN_REDIRECT_URL = '/dashboard/'
+LOGIN_URL = 'login'  # Redirect to login page if user is not authenticated
+LOGIN_REDIRECT_URL = 'dashboard'  # Redirect to dashboard after login
+LOGOUT_REDIRECT_URL = 'login'  # Redirect to login page after logout
 
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 EMAIL_HOST = 'smtp.gmail.com'  # Replace with your SMTP server

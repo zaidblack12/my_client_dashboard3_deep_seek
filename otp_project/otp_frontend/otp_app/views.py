@@ -4,11 +4,7 @@ from .forms import OTPRequestForm
 import requests
 import logging
 from django_ratelimit.decorators import ratelimit
-from django.core.mail import send_mail
-from django.template.loader import render_to_string
-from django.utils.http import urlsafe_base64_encode
-from django.utils.encoding import force_bytes
-from django.contrib.auth.tokens import default_token_generator
+
 from django.shortcuts import redirect
 from django.contrib.auth import get_user_model
 from django.utils.http import urlsafe_base64_decode
@@ -16,9 +12,40 @@ from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from django.template.loader import render_to_string
 from django.core.mail import EmailMessage
-
+from .utils import encrypt_data, decrypt_data
+from .forms import RegistrationForm
+from .utils import send_verification_email
+from django.contrib.auth import authenticate, login
+from django.contrib.auth.forms import AuthenticationForm
 
 logger = logging.getLogger(__name__)
+
+def register(request):
+    if request.method == 'POST':
+        form = RegistrationForm(request.POST)
+        if form.is_valid():
+            user = form.save()
+            send_verification_email(user)  # Send verification email
+            return redirect('registration_success')
+    else:
+        form = RegistrationForm()
+    return render(request, 'otp_app/register.html', {'form': form})
+
+
+def login_view(request):
+    if request.method == 'POST':
+        form = AuthenticationForm(request, data=request.POST)
+        if form.is_valid():
+            username = form.cleaned_data.get('username')
+            password = form.cleaned_data.get('password')
+            user = authenticate(username=username, password=password)
+            if user is not None:
+                login(request, user)
+                return redirect('dashboard')
+    else:
+        form = AuthenticationForm()
+    return render(request, 'otp_app/login.html', {'form': form})
+
 
 @login_required
 def dashboard(request):
@@ -33,18 +60,17 @@ def request_otp(request):
             date = form.cleaned_data['date']
             mobile_number = form.cleaned_data['mobile_number']
 
-            # Get the JWT token for the logged-in user
-            token = get_jwt_token(request.user.username)
+            # Fetch OTP records from the backend
+            otp_records = fetch_otp_records_from_backend(date, mobile_number)
 
-            # Call the FastAPI backend
-            response = request_otp_from_backend(date, mobile_number, token)
+            # Encrypt the OTP records
+            encrypted_records = encrypt_data(otp_records)
 
-            # Display the response status
-            return render(request, 'otp_app/request_otp.html', {'form': form, 'status': response.get('status')})
-    else:
-        form = OTPRequestForm()
-    return render(request, 'otp_app/request_otp.html', {'form': form})
+            # Send the encrypted records via email
+            send_email(request.user.email, encrypted_records)
 
+            return render(request, 'otp_app/request_otp.html', {'form': form, 'status': 'Email sent successfully'})
+        
 def get_jwt_token(username):
     # Mock function to get a JWT token for the user
     # Replace this with actual logic to get a token (e.g., call FastAPI's /token endpoint)
@@ -54,7 +80,7 @@ def get_jwt_token(username):
     return response.json().get('access_token')
 
 def request_otp_from_backend(date, mobile_number, token):
-    url = "http://localhost:8000/request-otp/"
+    url = "http://localhost:8001/request-otp/"
     headers = {"Authorization": f"Bearer {token}"}
     data = {"date": date, "mobile_number": mobile_number}
     try:
@@ -74,16 +100,7 @@ def request_otp_from_backend(date, mobile_number, token):
         return {"status": f"Error: {str(e)}"}
 
 
-def send_verification_email(user):
-    token = default_token_generator.make_token(user)
-    uid = urlsafe_base64_encode(force_bytes(user.pk))
-    subject = "Verify Your Email"
-    message = render_to_string('otp_app/verification_email.html', {
-        'user': user,
-        'uid': uid,
-        'token': token,
-    })
-    send_mail(subject, message, 'from@example.com', [user.email])
+
 
 def verify_email(request, uidb64, token):
     User = get_user_model()
@@ -100,10 +117,6 @@ def verify_email(request, uidb64, token):
     else:
         return redirect('invalid_verification')
     
-def send_otp_email(email, encrypted_data):
-    subject = "Your OTP Records"
-    message = f"Please find your encrypted OTP records attached.\n\n{encrypted_data}"
-    send_mail(subject, message, 'from@example.com', [email])
 
 
 def send_otp_email(email, encrypted_data):
@@ -112,3 +125,8 @@ def send_otp_email(email, encrypted_data):
     email_message = EmailMessage(subject, message, 'from@example.com', [email])
     email_message.content_subtype = 'html'
     email_message.send()
+
+def some_view(request):
+    data = "Sensitive data"
+    encrypted_data = encrypt_data(data)
+    decrypted_data = decrypt_data(encrypted_data)
